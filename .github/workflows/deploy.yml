@@ -1,0 +1,32 @@
+name: Backend
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Deploy to Server
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            sudo su
+            mkdir -p /root/backend
+            cd /root/backend
+
+            git pull https://x-access-token:${{ secrets.GH_PAT }}@github.com/owner-name/repo.git
+            npm install
+
+            pm2 stop server
+
+            pm2 start server.js --name server

@@ -1,0 +1,13 @@
+{
+    "watch": ["src"],
+    "ignore": [
+        "node_modules",
+        "dist",
+        "build",
+        "*.log",
+        "bhah1zp8-*",
+        "temp-builds",
+        "vite-builds"
+    ],
+    "ext": "js,jsx,ts,tsx,json"
+}
