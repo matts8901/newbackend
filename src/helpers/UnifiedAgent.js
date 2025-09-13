@@ -786,7 +786,7 @@ Analyze if this is a cloning/replication request:
 if url does not contain http/https add the protocl before passing it to url parameter strictly
 json markers should not be present
 
-Reply with JSON: {"isCloning": true/false, "url": "url_if_found_or_null"}`;
+Reply with JSON: {"isCloning": true/false, "url": "cloudfront_url_if_found_or_null"}`;
 
     const cloneAnalysisResult = await llmInstance.invoke([
       { role: "system", content: "Reply only in JSON format." },
