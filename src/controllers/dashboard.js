@@ -4,6 +4,7 @@ const Project = require("../models/Project");
 const Sessions = require("../models/Session");
 const SubDatabase = require("../models/subDB");
 const SubUser = require("../models/subUser");
+const Gallery = require("../models/Gallery");
 
 exports.dlogin = async (req, res) => {
   try {
@@ -1051,5 +1052,377 @@ exports.checkproject = async (req, res) => {
   } catch (error) {
     console.log(error);
     res.status(400).json({ success: false });
+  }
+};
+
+// Gallery API endpoints
+
+exports.storeImage = async (req, res) => {
+  try {
+    const {
+      projectId,
+      email,
+      label,
+      imageUrl,
+      imageName,
+      imageSize,
+      mimeType,
+      tags = [],
+      description = "",
+      isPublic = true,
+    } = req.body;
+
+    // Validate input
+    if (
+      !projectId ||
+      !email ||
+      !label ||
+      !imageUrl ||
+      !imageName ||
+      !mimeType
+    ) {
+      return res.status(400).json({
+        message:
+          "ProjectId, email, label, imageUrl, imageName, and mimeType are required",
+        success: false,
+      });
+    }
+
+    // Validate project exists
+    const project = await Project.findOne({ generatedName: projectId });
+    if (!project) {
+      return res
+        .status(404)
+        .json({ message: "Project not found", success: false });
+    }
+
+    // Check if user exists (like getinternalDB function)
+    const user = await SubUser.findOne({ email });
+    if (!user) {
+      return res
+        .status(403)
+        .json({ message: "User not found", success: false });
+    }
+
+    // Create new gallery entry
+    const galleryEntry = new Gallery({
+      projectId,
+      label,
+      imageUrl,
+      imageName,
+      imageSize: imageSize || 0,
+      mimeType,
+      uploadedBy: user._id,
+      tags,
+      description,
+      isPublic,
+    });
+
+    await galleryEntry.save();
+
+    // Log image storage
+    await new Logs({
+      log: `Image stored in gallery by ${email}: ${imageName} (${label})`,
+      projectId,
+    }).save();
+
+    res.status(200).json({
+      success: true,
+      message: "Image stored successfully",
+      image: {
+        id: galleryEntry._id,
+        label: galleryEntry.label,
+        imageUrl: galleryEntry.imageUrl,
+        imageName: galleryEntry.imageName,
+        createdAt: galleryEntry.createdAt,
+      },
+    });
+  } catch (error) {
+    console.log(error);
+    res.status(500).send("Internal Server Error");
+  }
+};
+
+exports.getImages = async (req, res) => {
+  try {
+    const {
+      projectId,
+      email,
+      label = null,
+      from = 1,
+      to = 20,
+      tags = [],
+      isPublic = null,
+    } = req.body;
+
+    // Validate input
+    if (!projectId || !email) {
+      return res.status(400).json({
+        message: "ProjectId and email are required",
+        success: false,
+      });
+    }
+
+    // Validate project exists
+    const project = await Project.findOne({ generatedName: projectId });
+    if (!project) {
+      return res
+        .status(404)
+        .json({ message: "Project not found", success: false });
+    }
+
+    // Check if user exists (like getinternalDB function)
+    const user = await SubUser.findOne({ email });
+    if (!user) {
+      return res
+        .status(403)
+        .json({ message: "User not found", success: false });
+    }
+
+    // Build query
+    const query = {
+      projectId,
+      status: "active",
+    };
+
+    if (label) {
+      query.label = { $regex: label, $options: "i" };
+    }
+
+    if (tags && tags.length > 0) {
+      query.tags = { $in: tags };
+    }
+
+    if (isPublic !== null) {
+      query.isPublic = isPublic;
+    }
+
+    // Calculate pagination
+    const skip = from - 1;
+    const limit = to - from + 1;
+
+    // Get images with pagination
+    const images = await Gallery.find(query)
+      .select(
+        "_id label imageUrl imageName imageSize mimeType tags description isPublic createdAt updatedAt"
+      )
+      .populate("uploadedBy", "email")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    // Get total count for pagination
+    const totalImages = await Gallery.countDocuments(query);
+
+    // Log image retrieval
+    await new Logs({
+      log: `Images retrieved by ${email}: ${images.length} images (label: ${label || "all"})`,
+      projectId,
+    }).save();
+
+    res.status(200).json({
+      success: true,
+      images,
+      pagination: {
+        from,
+        to,
+        total: totalImages,
+        hasMore: from - 1 + images.length < totalImages,
+      },
+    });
+  } catch (error) {
+    console.log(error);
+    res.status(500).send("Internal Server Error");
+  }
+};
+
+exports.deleteImage = async (req, res) => {
+  try {
+    const { projectId, email, imageId } = req.body;
+
+    // Validate input
+    if (!projectId || !email || !imageId) {
+      return res.status(400).json({
+        message: "ProjectId, email, and imageId are required",
+        success: false,
+      });
+    }
+
+    // Validate project exists
+    const project = await Project.findOne({ generatedName: projectId });
+    if (!project) {
+      return res
+        .status(404)
+        .json({ message: "Project not found", success: false });
+    }
+
+    // Check if user exists (like getinternalDB function)
+    const user = await SubUser.findOne({ email });
+    if (!user) {
+      return res
+        .status(403)
+        .json({ message: "User not found", success: false });
+    }
+
+    // Find the image to delete
+    const image = await Gallery.findOne({
+      _id: imageId,
+      projectId,
+      status: "active",
+    });
+
+    if (!image) {
+      return res
+        .status(404)
+        .json({ message: "Image not found", success: false });
+    }
+
+    // Soft delete the image
+    await Gallery.updateOne({ _id: imageId, projectId }, { status: "deleted" });
+
+    // Log image deletion
+    await new Logs({
+      log: `Image deleted by ${email}: ${image.imageName} (${image.label})`,
+      projectId,
+    }).save();
+
+    res.status(200).json({
+      success: true,
+      message: "Image deleted successfully",
+      deletedImage: {
+        id: image._id,
+        label: image.label,
+        imageName: image.imageName,
+      },
+    });
+  } catch (error) {
+    console.log(error);
+    res.status(500).send("Internal Server Error");
+  }
+};
+
+exports.getImageById = async (req, res) => {
+  try {
+    const { projectId, email, imageId } = req.body;
+
+    // Validate input
+    if (!projectId || !email || !imageId) {
+      return res.status(400).json({
+        message: "ProjectId, email, and imageId are required",
+        success: false,
+      });
+    }
+
+    // Validate project exists
+    const project = await Project.findOne({ generatedName: projectId });
+    if (!project) {
+      return res
+        .status(404)
+        .json({ message: "Project not found", success: false });
+    }
+
+    // Check if user exists (like getinternalDB function)
+    const user = await SubUser.findOne({ email });
+    if (!user) {
+      return res
+        .status(403)
+        .json({ message: "User not found", success: false });
+    }
+
+    // Find the specific image
+    const image = await Gallery.findOne({
+      _id: imageId,
+      projectId,
+      status: "active",
+    }).populate("uploadedBy", "email");
+
+    if (!image) {
+      return res
+        .status(404)
+        .json({ message: "Image not found", success: false });
+    }
+
+    // Log image access
+    await new Logs({
+      log: `Image accessed by ${email}: ${image.imageName} (${image.label})`,
+      projectId,
+    }).save();
+
+    res.status(200).json({
+      success: true,
+      image,
+    });
+  } catch (error) {
+    console.log(error);
+    res.status(500).send("Internal Server Error");
+  }
+};
+
+exports.updateImage = async (req, res) => {
+  try {
+    const { projectId, email, imageId, label, tags, description, isPublic } =
+      req.body;
+
+    // Validate input
+    if (!projectId || !email || !imageId) {
+      return res.status(400).json({
+        message: "ProjectId, email, and imageId are required",
+        success: false,
+      });
+    }
+
+    // Validate project exists
+    const project = await Project.findOne({ generatedName: projectId });
+    if (!project) {
+      return res
+        .status(404)
+        .json({ message: "Project not found", success: false });
+    }
+
+    // Check if user exists (like getinternalDB function)
+    const user = await SubUser.findOne({ email });
+    if (!user) {
+      return res
+        .status(403)
+        .json({ message: "User not found", success: false });
+    }
+
+    // Find the image to update
+    const image = await Gallery.findOne({
+      _id: imageId,
+      projectId,
+      status: "active",
+    });
+
+    if (!image) {
+      return res
+        .status(404)
+        .json({ message: "Image not found", success: false });
+    }
+
+    // Build update data
+    const updateData = {};
+    if (label !== undefined) updateData.label = label;
+    if (tags !== undefined) updateData.tags = tags;
+    if (description !== undefined) updateData.description = description;
+    if (isPublic !== undefined) updateData.isPublic = isPublic;
+
+    // Update the image
+    await Gallery.updateOne({ _id: imageId, projectId }, updateData);
+
+    // Log image update
+    const updateFields = Object.keys(updateData).join(", ");
+    await new Logs({
+      log: `Image updated by ${email}: ${image.imageName}, fields=[${updateFields}]`,
+      projectId,
+    }).save();
+
+    res.status(200).json({
+      success: true,
+      message: "Image updated successfully",
+    });
+  } catch (error) {
+    console.log(error);
+    res.status(500).send("Internal Server Error");
   }
 };

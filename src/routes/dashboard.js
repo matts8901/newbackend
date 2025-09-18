@@ -19,6 +19,11 @@ const {
   getdata,
   checkuser,
   getinternalDB,
+  getImages,
+  storeImage,
+  deleteImage,
+  getImageById,
+  updateImage,
 } = require("../controllers/dashboard");
 
 const router = express.Router();
@@ -41,6 +46,13 @@ router.post("/d/checkuser", checkuser);
 router.post("/d/overview", doverview);
 router.post("/d/authmethods", authmethods);
 router.post("/d/logs", dlogs);
+
+//gallery
+router.post("/d/gallery", getImages);
+router.post("/d/gallery/store", storeImage);
+router.post("/d/gallery/delete", deleteImage);
+router.post("/d/gallery/get", getImageById);
+router.post("/d/gallery/update", updateImage);
 
 //DB
 router.post("/d/getdb", getDB);

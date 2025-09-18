@@ -20,6 +20,7 @@ const Message = require("../models/Message");
 const User = require("../models/User");
 const Plan = require("../models/Plan");
 const Project = require("../models/Project");
+const Gallery = require("../models/Gallery");
 
 // Dynamic import to avoid circular dependency
 const getSaveMessageHelper = async () => {
@@ -386,7 +387,8 @@ const createUnifiedAgent = async (
   images = null,
   fix,
   uid,
-  pid
+  pid,
+  galleryImages
 ) => {
   // Core node - handles framework-based routing intelligently
   const coreNode = async (state) => {
@@ -411,7 +413,6 @@ const createUnifiedAgent = async (
       const chatMessages = [
         { role: "system", content: Leadtest() },
         { role: "user", content: userInput },
-        { role: "assistant", content: "{" },
       ];
 
       const res = await llmInstance.invoke(chatMessages);
@@ -471,7 +472,7 @@ const createUnifiedAgent = async (
           content: [
             {
               type: "text",
-              text: `${userInput} + All the Code: ${JSON.stringify(allcode)} + Previous Messages - ${JSON.stringify(history)}`,
+              text: `${userInput} + All the Code: ${JSON.stringify(allcode)} + Previous Messages - ${JSON.stringify(history)} + Gallery Images - ${JSON.stringify(galleryImages)}`,
             },
 
             ...processedImages,
@@ -645,6 +646,7 @@ const startUnifiedAgent = async (
     let allcode = null;
 
     let prevImages = [];
+    let galleryImages = [];
 
     if (user && Proj) {
       allMessages = await Message.find({
@@ -673,9 +675,42 @@ const startUnifiedAgent = async (
           console.error("Error fetching code from project URL:", error);
         }
       }
+
+      // Fetch gallery images for the project
+      try {
+        const galleryData = await Gallery.find({
+          projectId: projectId,
+          status: "active",
+        })
+          .select("_id label imageUrl imageName description tags")
+          .sort({ createdAt: -1 })
+          .limit(20); // Limit to 20 most recent images
+
+        galleryImages = galleryData.map((img) => ({
+          id: img._id,
+          label: img.label,
+          url: img.imageUrl,
+          name: img.imageName,
+          description: img.description,
+          tags: img.tags,
+        }));
+
+        console.log(
+          `Fetched ${galleryImages.length} gallery images for project ${projectId}:`,
+          galleryImages.map((img) => ({ label: img.label, url: img.url }))
+        );
+      } catch (error) {
+        console.error("Error fetching gallery images:", error);
+        galleryImages = [];
+      }
     }
 
+    // Combine all image sources: input images, previous images, and gallery images
     let allimgs = [...images, ...prevImages];
+
+    console.log(
+      `Total images available to agent: ${allimgs.length} (input: ${images?.length || 0}, previous: ${prevImages.length}, gallery: ${galleryImages.length})`
+    );
 
     const workflow = await createUnifiedAgent(
       allMessages,
@@ -690,7 +725,11 @@ const startUnifiedAgent = async (
       allimgs,
       fix,
       uid,
-      Proj._id
+      Proj._id,
+      galleryImages.map((img) => ({
+        label: img.label,
+        url: img.url,
+      }))
     );
 
     const finalPrompt = JSON.stringify({
@@ -699,7 +738,11 @@ const startUnifiedAgent = async (
       memory,
       cssLib,
       framework,
-      images,
+      images: allimgs, // Include all images (input + previous + gallery)
+      galleryImages: galleryImages.map((img) => ({
+        label: img.label,
+        url: img.url,
+      })), // Specifically include gallery images for reference
     });
 
     const stream = workflow.streamEvents(
